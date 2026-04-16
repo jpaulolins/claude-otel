@@ -1,0 +1,19 @@
+{
+  "users": [
+    {
+      "token": "admin-token-change-me",
+      "email": "admin@empresa.com",
+      "role": "admin"
+    },
+    {
+      "token": "viewer-token-joao",
+      "email": "joao.lins@example.com",
+      "role": "viewer"
+    },
+    {
+      "token": "viewer-token-maria",
+      "email": "maria@empresa.com",
+      "role": "viewer"
+    }
+  ]
+}

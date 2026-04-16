@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "claude-otel": {
+      "url": "http://localhost:8081/mcp",
+      "headers": {
+        "Authorization": "Bearer ${CLAUDE_OTEL_MCP_TOKEN:-admin-token}"
+      }
+    }
+  }
+}

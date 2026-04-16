@@ -1,0 +1,83 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: observability
+      CLICKHOUSE_USER: otel_ingest
+      CLICKHOUSE_PASSWORD: CHANGE_ME
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/init:/docker-entrypoint-initdb.d
+    # With CLICKHOUSE_USER != default, clickhouse-client without -u/-password cannot connect.
+    # HTTP /ping does not require SQL credentials.
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.149.0
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "4318:4318"
+      - "13133:13133"
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+
+  audit-service:
+    build:
+      context: ./go-hook-mcp-api
+      dockerfile: Dockerfile.audit-service
+    container_name: audit-service
+    depends_on:
+      - otel-collector
+    environment:
+      OTEL_SERVICE_NAME: claude-audit-service
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_HEADERS: Authorization=Bearer CHANGE_ME
+      AUDIT_API_TOKEN: CHANGE_ME
+    ports:
+      - "8080:8080"
+
+  mcp-server:
+    build:
+      context: ./go-hook-mcp-api
+      dockerfile: Dockerfile.mcp-server
+    container_name: mcp-server
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      CLICKHOUSE_DSN: "clickhouse://otel_ingest:CHANGE_ME@clickhouse:9000/observability"
+      # Streamable HTTP transport (MCP spec rev 2025-03-26) on a single /mcp endpoint.
+      MCP_TRANSPORT: http
+      MCP_HTTP_ADDR: ":8081"
+      # Local development feature flag: when "true", the MCP server accepts all
+      # requests without Bearer token validation and runs every tool as a
+      # synthetic admin user. Set to "false" (or remove) in production and rely
+      # on MCP_USER_TOKENS / MCP_USERS_FILE for real authentication.
+      MCP_DISABLE_AUTH: "true"
+      # Optional synthetic identity used when MCP_DISABLE_AUTH=true.
+      MCP_USER_EMAIL: "anonymous@local"
+      MCP_USER_ROLE: "admin"
+      # Used only when MCP_DISABLE_AUTH is not "true". Kept here so flipping the
+      # flag off immediately re-enables the original multi-user auth setup.
+      MCP_USER_TOKENS: "admin-token=admin@example.com:admin,viewer-token=joao.lins@example.com:viewer"
+    ports:
+      - "8081:8081"
+    profiles:
+      - mcp
+
+volumes:
+  clickhouse_data:

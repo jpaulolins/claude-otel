@@ -1,0 +1,18 @@
+{
+  "event_type": "claude_code.bash.post_tool_use",
+  "user_id": "jon@empresa.com",
+  "session_id": "abc123",
+  "tool_use_id": "toolu_01ABC123",
+  "tool_name": "Bash",
+  "command": "npm test",
+  "cwd": "/repo/app",
+  "permission_mode": "default",
+  "success": true,
+  "tool_response": {
+    "exit_code": 0,
+    "stdout": "...",
+    "stderr": ""
+  },
+  "transcript_path": "/Users/.../.claude/projects/...jsonl",
+  "timestamp": "2026-04-12T21:05:00Z"
+}

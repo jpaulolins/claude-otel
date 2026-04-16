@@ -1,0 +1,64 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024
+    spike_limit_mib: 256
+
+  batch:
+    timeout: 5s
+    send_batch_size: 2000
+    send_batch_max_size: 5000
+
+  resource:
+    attributes:
+      - key: telemetry.source
+        value: claude-code
+        action: upsert
+
+extensions:
+  health_check:
+    # Bind on all interfaces so Docker can publish port 13133 to the host.
+    endpoint: "0.0.0.0:13133"
+    path: "/"
+
+exporters:
+  clickhouse:
+    endpoint: tcp://clickhouse:9000?database=observability&username=otel_ingest&password=CHANGE_ME
+    create_schema: true
+    traces_table_name: otel_traces
+    logs_table_name: otel_logs
+    metrics_table_name: otel_metrics
+    timeout: 10s
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 10000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+service:
+  extensions: [health_check]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [clickhouse]
+
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [clickhouse]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [clickhouse]

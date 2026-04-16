@@ -1,0 +1,27 @@
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Environment and secrets (local only)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+go-hook-mcp-api/mcp-users.json
+
+# Claude/Cursor local state
+.claude/settings.local.json
+
+# Go build/test artifacts
+go-hook-mcp-api/bin/
+*.test
+*.out
+coverage.out
+cover.out
+
+# Runtime logs and temp files
+*.log
+tmp/
+temp/
