@@ -100,13 +100,21 @@ log_err()   { printf "\033[0;31m[ERROR]\033[0m %s\n" "$*"; }
 now_iso() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 now_nano() { python3 -c "import time; print(int(time.time() * 1e9))"; }
 
+# Bash 3.2–compatible (macOS default): no `local -n` namerefs.
 rand_element() {
-  local -n arr=$1
-  echo "${arr[$((RANDOM % ${#arr[@]}))]}"
+  local arr_name=$1 size idx
+  eval "size=\${#${arr_name}[@]}"
+  idx=$((RANDOM % size))
+  eval "printf '%s\n' \"\${${arr_name}[$idx]}\""
 }
 
 rand_range() {
   echo $(( RANDOM % ($2 - $1 + 1) + $1 ))
+}
+
+# Bash 3.2 has no ${var,,}; use tr for lowercase.
+tolower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
 uuid_like() {
@@ -187,6 +195,10 @@ for user_idx in "${!USERS[@]}"; do
   user="${USERS[$user_idx]}"
   user_id="${USER_IDS[$user_idx]}"
   cwd="${CWDS[$user_idx]}"
+  # repository = filepath.Base(cwd) — matches audit.Normalize() behaviour so
+  # Body.repository (hook events) and Attributes['repository'] (metrics below)
+  # use the same canonical value per user/session.
+  repo=$(basename "$cwd")
 
   # 3 sessions per user spread over the week
   for s in 1 2 3; do
@@ -202,6 +214,7 @@ for user_idx in "${!USERS[@]}"; do
       if (( hours_ago < 0 )); then hours_ago=0; fi
       ts=$(past_timestamp $hours_ago)
       tool=$(rand_element TOOLS)
+      tool_lc=$(tolower "$tool")
       tool_use_id="toolu_$(uuid_like | tr -d '-' | head -c 20)"
 
       # Build command/content based on tool
@@ -215,12 +228,12 @@ for user_idx in "${!USERS[@]}"; do
         Agent)   cmd="Explore codebase structure" ;;
       esac
 
-      event_type="claude_code.${tool,,}.post_tool_use"
+      event_type="claude_code.${tool_lc}.post_tool_use"
 
       # --- PRE-TOOL-USE ---
       payload=$(cat <<ENDJSON
 {
-  "event_type": "claude_code.${tool,,}.pre_tool_use",
+  "event_type": "claude_code.${tool_lc}.pre_tool_use",
   "user_id": "$user",
   "session_id": "$session_id",
   "tool_use_id": "$tool_use_id",
@@ -229,6 +242,8 @@ for user_idx in "${!USERS[@]}"; do
   "cwd": "$cwd",
   "permission_mode": "default",
   "success": true,
+  "repository": "$repo",
+  "organization_id": "$ORG_ID",
   "timestamp": "$ts"
 }
 ENDJSON
@@ -269,6 +284,8 @@ ENDJSON
     "stderr": "$stderr_msg"
   },
   "transcript_path": "/Users/${user%%@*}/.claude/projects/proj/transcript.jsonl",
+  "repository": "$repo",
+  "organization_id": "$ORG_ID",
   "timestamp": "$ts"
 }
 ENDJSON
@@ -289,6 +306,8 @@ ENDJSON
   "cwd": "$cwd",
   "permission_mode": "default",
   "success": true,
+  "repository": "$repo",
+  "organization_id": "$ORG_ID",
   "timestamp": "$ts"
 }
 ENDJSON
@@ -334,6 +353,9 @@ cost_output_haiku=4.0
 for user_idx in "${!USERS[@]}"; do
   user="${USERS[$user_idx]}"
   user_id="${USER_IDS[$user_idx]}"
+  # repository attribute mirrors basename(CWDS[user_idx]) used in Phase 1,
+  # so metrics Attributes['repository'] matches otel_logs Body.repository.
+  repo=$(basename "${CWDS[$user_idx]}")
 
   for s in 1 2 3; do
     session_id="session-$(uuid_like)"
@@ -395,7 +417,8 @@ for user_idx in "${!USERS[@]}"; do
                   {"key": "organization.id", "value": {"stringValue": "$ORG_ID"}},
                   {"key": "model", "value": {"stringValue": "$model"}},
                   {"key": "type", "value": {"stringValue": "input"}},
-                  {"key": "session.id", "value": {"stringValue": "$session_id"}}
+                  {"key": "session.id", "value": {"stringValue": "$session_id"}},
+                  {"key": "repository", "value": {"stringValue": "$repo"}}
                 ]
               },
               {
@@ -408,7 +431,8 @@ for user_idx in "${!USERS[@]}"; do
                   {"key": "organization.id", "value": {"stringValue": "$ORG_ID"}},
                   {"key": "model", "value": {"stringValue": "$model"}},
                   {"key": "type", "value": {"stringValue": "output"}},
-                  {"key": "session.id", "value": {"stringValue": "$session_id"}}
+                  {"key": "session.id", "value": {"stringValue": "$session_id"}},
+                  {"key": "repository", "value": {"stringValue": "$repo"}}
                 ]
               },
               {
@@ -421,7 +445,8 @@ for user_idx in "${!USERS[@]}"; do
                   {"key": "organization.id", "value": {"stringValue": "$ORG_ID"}},
                   {"key": "model", "value": {"stringValue": "$model"}},
                   {"key": "type", "value": {"stringValue": "cacheRead"}},
-                  {"key": "session.id", "value": {"stringValue": "$session_id"}}
+                  {"key": "session.id", "value": {"stringValue": "$session_id"}},
+                  {"key": "repository", "value": {"stringValue": "$repo"}}
                 ]
               },
               {
@@ -434,7 +459,8 @@ for user_idx in "${!USERS[@]}"; do
                   {"key": "organization.id", "value": {"stringValue": "$ORG_ID"}},
                   {"key": "model", "value": {"stringValue": "$model"}},
                   {"key": "type", "value": {"stringValue": "cacheCreation"}},
-                  {"key": "session.id", "value": {"stringValue": "$session_id"}}
+                  {"key": "session.id", "value": {"stringValue": "$session_id"}},
+                  {"key": "repository", "value": {"stringValue": "$repo"}}
                 ]
               }
             ],
@@ -455,7 +481,8 @@ for user_idx in "${!USERS[@]}"; do
                   {"key": "user.id", "value": {"stringValue": "$user_id"}},
                   {"key": "organization.id", "value": {"stringValue": "$ORG_ID"}},
                   {"key": "model", "value": {"stringValue": "$model"}},
-                  {"key": "session.id", "value": {"stringValue": "$session_id"}}
+                  {"key": "session.id", "value": {"stringValue": "$session_id"}},
+                  {"key": "repository", "value": {"stringValue": "$repo"}}
                 ]
               }
             ],
@@ -475,7 +502,8 @@ for user_idx in "${!USERS[@]}"; do
                   {"key": "user.email", "value": {"stringValue": "$user"}},
                   {"key": "user.id", "value": {"stringValue": "$user_id"}},
                   {"key": "organization.id", "value": {"stringValue": "$ORG_ID"}},
-                  {"key": "session.id", "value": {"stringValue": "$session_id"}}
+                  {"key": "session.id", "value": {"stringValue": "$session_id"}},
+                  {"key": "repository", "value": {"stringValue": "$repo"}}
                 ]
               }
             ],
@@ -516,7 +544,8 @@ ENDJSON
                   {"key": "user.id", "value": {"stringValue": "$user_id"}},
                   {"key": "organization.id", "value": {"stringValue": "$ORG_ID"}},
                   {"key": "model", "value": {"stringValue": "$model"}},
-                  {"key": "session.id", "value": {"stringValue": "$session_id"}}
+                  {"key": "session.id", "value": {"stringValue": "$session_id"}},
+                  {"key": "repository", "value": {"stringValue": "$repo"}}
                 ]
               }
             ]
@@ -582,6 +611,92 @@ if $all_ok; then
 else
   log_err "Some tables are empty. Check the OTEL collector logs:"
   log_err "  docker compose logs otel-collector --tail 50"
+fi
+
+echo ""
+log_info "======================================"
+log_info "  Validating tool-query readiness"
+log_info "  (repository + organization_id fanout)"
+log_info "  — used by report_activity_timeline,"
+log_info "    report_token_usage, report_developer_roi"
+log_info "======================================"
+
+# log_warn is introduced here (non-fatal): distinct from log_err because
+# the seed must still exit 0 when a validation signals a gap.
+log_warn() { printf "\033[0;33m[WARN]\033[0m  %s\n" "$*"; }
+
+# Tiny helper: runs a ClickHouse query, trims whitespace, returns empty
+# string on error (so `[[ -n ... ]]` checks behave predictably).
+check_query() {
+  local q=$1
+  local out
+  out=$(query_ch "$q" 2>/dev/null | tr -d '[:space:]')
+  printf '%s' "$out"
+}
+
+# 1. otel_logs: total > 0, distinct repositories > 1, distinct org_id == 1
+logs_total=$(check_query "SELECT count() FROM observability.otel_logs")
+logs_repos=$(check_query "SELECT uniqExact(JSONExtractString(Body,'repository')) FROM observability.otel_logs WHERE JSONExtractString(Body,'repository') != ''")
+logs_orgs=$(check_query "SELECT uniqExact(JSONExtractString(Body,'organization_id')) FROM observability.otel_logs WHERE JSONExtractString(Body,'organization_id') != ''")
+
+if [[ -n "$logs_total" && "$logs_total" -gt 0 ]] 2>/dev/null; then
+  log_ok "otel_logs rows: $logs_total"
+else
+  log_warn "otel_logs is empty — query: SELECT count() FROM observability.otel_logs"
+fi
+if [[ -n "$logs_repos" && "$logs_repos" -gt 1 ]] 2>/dev/null; then
+  log_ok "otel_logs distinct repositories: $logs_repos"
+else
+  log_warn "otel_logs distinct repositories=${logs_repos:-0} (expected >1) — query: SELECT uniqExact(JSONExtractString(Body,'repository')) FROM observability.otel_logs"
+fi
+if [[ -n "$logs_orgs" && "$logs_orgs" == "1" ]]; then
+  log_ok "otel_logs distinct organization_id: $logs_orgs (= $ORG_ID)"
+else
+  log_warn "otel_logs distinct organization_id=${logs_orgs:-0} (expected ==1) — query: SELECT uniqExact(JSONExtractString(Body,'organization_id')) FROM observability.otel_logs"
+fi
+
+# 2. otel_traces: total > 0, contains audit service
+traces_total=$(check_query "SELECT count() FROM observability.otel_traces")
+traces_has_audit=$(check_query "SELECT count() FROM observability.otel_traces WHERE ServiceName = 'claude-audit-service'")
+if [[ -n "$traces_total" && "$traces_total" -gt 0 ]] 2>/dev/null; then
+  log_ok "otel_traces rows: $traces_total"
+else
+  log_warn "otel_traces is empty — query: SELECT count() FROM observability.otel_traces"
+fi
+if [[ -n "$traces_has_audit" && "$traces_has_audit" -gt 0 ]] 2>/dev/null; then
+  log_ok "otel_traces has ServiceName='claude-audit-service' rows: $traces_has_audit"
+else
+  log_warn "otel_traces missing claude-audit-service spans — query: SELECT count() FROM observability.otel_traces WHERE ServiceName='claude-audit-service'"
+fi
+
+# 3. otel_metrics_sum: per-MetricName count + distinct repository attr > 1
+for mn in "claude_code.token.usage" "claude_code.cost.usage" "claude_code.session.count"; do
+  mc=$(check_query "SELECT count() FROM observability.otel_metrics_sum WHERE MetricName = '$mn'")
+  if [[ -n "$mc" && "$mc" -gt 0 ]] 2>/dev/null; then
+    log_ok "otel_metrics_sum[$mn]: $mc rows"
+  else
+    log_warn "otel_metrics_sum[$mn] empty — query: SELECT count() FROM observability.otel_metrics_sum WHERE MetricName='$mn'"
+  fi
+done
+sum_repos=$(check_query "SELECT uniqExact(Attributes['repository']) FROM observability.otel_metrics_sum WHERE Attributes['repository'] != ''")
+if [[ -n "$sum_repos" && "$sum_repos" -gt 1 ]] 2>/dev/null; then
+  log_ok "otel_metrics_sum distinct Attributes['repository']: $sum_repos"
+else
+  log_warn "otel_metrics_sum distinct Attributes['repository']=${sum_repos:-0} (expected >1) — query: SELECT uniqExact(Attributes['repository']) FROM observability.otel_metrics_sum"
+fi
+
+# 4. otel_metrics_gauge: active_time count + distinct repository > 1
+gauge_at=$(check_query "SELECT count() FROM observability.otel_metrics_gauge WHERE MetricName = 'claude_code.active_time.total'")
+if [[ -n "$gauge_at" && "$gauge_at" -gt 0 ]] 2>/dev/null; then
+  log_ok "otel_metrics_gauge[claude_code.active_time.total]: $gauge_at rows"
+else
+  log_warn "otel_metrics_gauge[claude_code.active_time.total] empty — query: SELECT count() FROM observability.otel_metrics_gauge WHERE MetricName='claude_code.active_time.total'"
+fi
+gauge_repos=$(check_query "SELECT uniqExact(Attributes['repository']) FROM observability.otel_metrics_gauge WHERE Attributes['repository'] != ''")
+if [[ -n "$gauge_repos" && "$gauge_repos" -gt 1 ]] 2>/dev/null; then
+  log_ok "otel_metrics_gauge distinct Attributes['repository']: $gauge_repos"
+else
+  log_warn "otel_metrics_gauge distinct Attributes['repository']=${gauge_repos:-0} (expected >1) — query: SELECT uniqExact(Attributes['repository']) FROM observability.otel_metrics_gauge"
 fi
 
 echo ""
