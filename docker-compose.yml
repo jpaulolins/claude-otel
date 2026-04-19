@@ -68,6 +68,8 @@ services:
       # synthetic admin user. Set to "false" (or remove) in production and rely
       # on MCP_USER_TOKENS / MCP_USERS_FILE for real authentication.
       MCP_DISABLE_AUTH: "true"
+      # Required companion to MCP_DISABLE_AUTH (see cmd/mcp/main.go). Local dev only.
+      MCP_DISABLE_AUTH_I_UNDERSTAND: "true"
       # Optional synthetic identity used when MCP_DISABLE_AUTH=true.
       MCP_USER_EMAIL: "anonymous@local"
       MCP_USER_ROLE: "admin"

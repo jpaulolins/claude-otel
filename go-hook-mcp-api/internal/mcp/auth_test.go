@@ -64,7 +64,10 @@ func TestSingleTokenResolver(t *testing.T) {
 
 func TestSingleTokenResolver_InvalidRole(t *testing.T) {
 	r := NewSingleTokenResolver("tok", "u@co.com", "invalid")
-	u, _ := r.Resolve("tok")
+	u, err := r.Resolve("tok")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
 	if u.Role != RoleViewer {
 		t.Errorf("role = %q; want viewer (default)", u.Role)
 	}
@@ -80,7 +83,9 @@ func TestResolverFromFile(t *testing.T) {
 	}`
 	dir := t.TempDir()
 	path := filepath.Join(dir, "users.json")
-	os.WriteFile(path, []byte(content), 0644)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write users.json: %v", err)
+	}
 
 	r, err := NewResolverFromFile(path)
 	if err != nil {
@@ -90,11 +95,17 @@ func TestResolverFromFile(t *testing.T) {
 		t.Errorf("UserCount = %d; want 3", r.UserCount())
 	}
 
-	u, _ := r.Resolve("t1")
+	u, err := r.Resolve("t1")
+	if err != nil {
+		t.Fatalf("resolve t1: %v", err)
+	}
 	if u.Role != RoleAdmin {
 		t.Errorf("t1 role = %q; want admin", u.Role)
 	}
-	u, _ = r.Resolve("t3")
+	u, err = r.Resolve("t3")
+	if err != nil {
+		t.Fatalf("resolve t3: %v", err)
+	}
 	if u.Role != RoleViewer {
 		t.Errorf("t3 role = %q; want viewer (default)", u.Role)
 	}
@@ -110,7 +121,9 @@ func TestResolverFromFile_MissingFile(t *testing.T) {
 func TestResolverFromFile_EmptyUsers(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "empty.json")
-	os.WriteFile(path, []byte(`{"users": []}`), 0644)
+	if err := os.WriteFile(path, []byte(`{"users": []}`), 0644); err != nil {
+		t.Fatalf("write empty.json: %v", err)
+	}
 
 	_, err := NewResolverFromFile(path)
 	if err == nil {

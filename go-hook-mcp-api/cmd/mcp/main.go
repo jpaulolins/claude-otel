@@ -8,6 +8,12 @@ import (
 	mcpint "go-hook-mcp-api/internal/mcp"
 )
 
+// disableAuthAckEnv is the second opt-in flag required to actually run the
+// MCP server without authentication. MCP_DISABLE_AUTH=true alone is not
+// enough — the operator must also set this to prove they understand the
+// risk.
+const disableAuthAckEnv = "MCP_DISABLE_AUTH_I_UNDERSTAND"
+
 func main() {
 	dsn := envOrDefault("CLICKHOUSE_DSN", "clickhouse://otel_ingest:CHANGE_ME@localhost:9000/observability")
 	transport := envOrDefault("MCP_TRANSPORT", "stdio")
@@ -23,11 +29,18 @@ func main() {
 	s := mcpint.NewServer(ch)
 
 	// When auth is disabled, a synthetic user is injected into every request so
-	// both admin- and viewer-scoped tools work without any credential.
-	// Intended for local development only — never enable in production.
+	// tools work without any credential. Intended for local development only —
+	// never enable in production. Requires a second explicit opt-in
+	// (MCP_DISABLE_AUTH_I_UNDERSTAND=true) to actually start.
 	if disableAuth {
-		fmt.Fprintln(os.Stderr, "WARNING: MCP_DISABLE_AUTH=true — MCP server will NOT require any authentication. Do NOT use in production.")
+		if !boolEnv(disableAuthAckEnv) {
+			fmt.Fprintf(os.Stderr, "refusing to start: MCP_DISABLE_AUTH=true also requires %s=true to confirm you understand the risk. This mode must never be used in production.\n", disableAuthAckEnv)
+			os.Exit(1)
+		}
+
+		fmt.Fprintln(os.Stderr, "SECURITY WARNING: MCP_DISABLE_AUTH=true — MCP server will NOT require any authentication. Do NOT use in production.")
 		user := anonymousUser()
+		fmt.Fprintf(os.Stderr, "SECURITY WARNING: unauthenticated user synthesized as %s [%s]\n", user.Email, user.Role)
 
 		switch transport {
 		case "stdio":
@@ -55,7 +68,7 @@ func main() {
 	case "stdio":
 		token := os.Getenv("MCP_USER_TOKEN")
 		if token == "" {
-			fmt.Fprintln(os.Stderr, "error: MCP_USER_TOKEN is required for stdio mode (or set MCP_DISABLE_AUTH=true for local testing)")
+			fmt.Fprintln(os.Stderr, "error: MCP_USER_TOKEN is required for stdio mode (or set MCP_DISABLE_AUTH=true and MCP_DISABLE_AUTH_I_UNDERSTAND=true for local testing)")
 			os.Exit(1)
 		}
 		if err := mcpint.ServeStdio(s, resolver, token); err != nil {
@@ -75,15 +88,16 @@ func main() {
 }
 
 // anonymousUser builds the synthetic identity used when MCP_DISABLE_AUTH=true.
-// Defaults to an admin role so every registered tool (admin + viewer) is reachable.
-// Email and role can be overridden with MCP_USER_EMAIL / MCP_USER_ROLE.
+// Defaults to the least-privileged viewer role so that admin-only tools remain
+// unreachable unless the operator explicitly sets MCP_USER_ROLE=admin. Invalid
+// role values also fall back to viewer.
 func anonymousUser() mcpint.User {
 	email := envOrDefault("MCP_USER_EMAIL", "anonymous@local")
-	role := envOrDefault("MCP_USER_ROLE", mcpint.RoleAdmin)
+	role := envOrDefault("MCP_USER_ROLE", mcpint.RoleViewer)
 	if role != mcpint.RoleAdmin && role != mcpint.RoleViewer {
-		role = mcpint.RoleAdmin
+		role = mcpint.RoleViewer
 	}
-	return mcpint.User{Token: "", Email: email, Role: role}
+	return mcpint.User{Token: "", Email: strings.ToLower(strings.TrimSpace(email)), Role: role}
 }
 
 // loadResolver tries to load users from MCP_USERS_FILE (JSON), otherwise falls back to MCP_USER_TOKENS env var.
@@ -106,10 +120,17 @@ func loadResolver() mcpint.UserResolver {
 		return r
 	}
 
-	// 3. Single token fallback (stdio mode convenience)
+	// 3. Single token fallback (stdio mode convenience). Defaults to the
+	// least-privileged viewer role — mirrors anonymousUser() so the
+	// token-authenticated fallback path does not silently grant admin.
+	// Operators must explicitly set MCP_USER_ROLE=admin to escalate.
 	token := os.Getenv("MCP_USER_TOKEN")
 	email := envOrDefault("MCP_USER_EMAIL", "unknown@local")
-	role := envOrDefault("MCP_USER_ROLE", "admin")
+	role := envOrDefault("MCP_USER_ROLE", mcpint.RoleViewer)
+	if role != mcpint.RoleAdmin && role != mcpint.RoleViewer {
+		fmt.Fprintf(os.Stderr, "SECURITY WARNING: invalid MCP_USER_ROLE=%q; defaulting to viewer\n", role)
+		role = mcpint.RoleViewer
+	}
 	return mcpint.NewSingleTokenResolver(token, email, role)
 }
 
