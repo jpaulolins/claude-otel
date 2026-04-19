@@ -35,9 +35,26 @@ func main() {
 	logger := otelexport.NewSlogLogger(providers.LoggerProvider, "audit-service")
 
 	h := &audit.Handler{Tracer: tracer, Logger: logger}
+
+	// Surface the auth configuration at startup so operators see it.
+	// BearerAuth panics when the token is empty and
+	// AUDIT_ALLOW_ANONYMOUS != "true" — that's the fail-closed default.
 	authToken := os.Getenv("AUDIT_API_TOKEN")
+	allowAnon := os.Getenv("AUDIT_ALLOW_ANONYMOUS") == "true"
+	switch {
+	case authToken != "":
+		fmt.Fprintln(os.Stderr, "audit-service: bearer auth ENABLED (AUDIT_API_TOKEN is set)")
+	case allowAnon:
+		fmt.Fprintln(os.Stderr, "SECURITY WARNING: audit-service starting with anonymous access (AUDIT_API_TOKEN empty, AUDIT_ALLOW_ANONYMOUS=true). Do NOT use in production.")
+	default:
+		fmt.Fprintln(os.Stderr, "audit-service: AUDIT_API_TOKEN is required; set AUDIT_ALLOW_ANONYMOUS=true to opt out (local dev only)")
+		// BearerAuth will panic below — we exit explicitly to produce a
+		// cleaner error than a panic stack trace.
+		os.Exit(1)
+	}
 
 	r := chi.NewRouter()
+	r.Use(securityHeadersMiddleware)
 	r.Get("/healthz", h.Healthz)
 
 	r.Group(func(r chi.Router) {
@@ -49,7 +66,15 @@ func main() {
 	})
 
 	addr := envOrDefault("LISTEN_ADDR", ":8080")
-	srv := &http.Server{Addr: addr, Handler: r}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
 
 	go func() {
 		fmt.Fprintf(os.Stdout, "audit-service listening on %s\n", addr)
@@ -63,10 +88,19 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	fmt.Fprintln(os.Stdout, "shutting down...")
+	fmt.Fprintln(os.Stderr, "shutting down...")
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutCtx)
+}
+
+// securityHeadersMiddleware adds defense-in-depth response headers to every
+// response served by the audit HTTP server.
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func envOrDefault(key, fallback string) string {
