@@ -13,6 +13,11 @@ go-hook-mcp-api/mcp-users.json
 
 # Claude/Cursor local state
 .claude/settings.local.json
+.ai-jail
+.planning/
+
+# Codereview pre-analysis artifacts (generated)
+go-hook-mcp-api/docs/codereview/
 
 # Go build/test artifacts
 go-hook-mcp-api/bin/
