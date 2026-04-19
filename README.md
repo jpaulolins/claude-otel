@@ -3,7 +3,7 @@
 ## Components
 
 - **`audit-service`** (Go): receives Claude hook events and sends OTLP logs/traces to the collector.
-- **`mcp-server`** (Go): MCP server (Streamable HTTP transport, MCP spec rev 2025-03-26) exposing 15 ClickHouse query tools for auditing tokens, costs, hooks, and traces.
+- **`mcp-server`** (Go): MCP server (Streamable HTTP transport, MCP spec rev 2025-03-26) exposing 11 ClickHouse query tools for auditing tokens, costs, hooks, and traces.
 - **`otel-collector`**: OTLP HTTP on `4318`, exports to ClickHouse (`create_schema: true`). Image pinned to `otel/opentelemetry-collector-contrib:0.149.0` for reproducible config.
 - **`clickhouse`**: database `observability`, user `otel_ingest` (see `clickhouse/init/01-init.sql`).
 
@@ -66,7 +66,7 @@ Other `./start.sh` commands: `up-mcp`, `restart`, `status`, `logs`. Use `./start
 
 ## MCP Server
 
-The MCP server exposes 15 tools for querying ClickHouse audit data. See `querys.md` for the full query reference.
+The MCP server exposes 11 tools for querying ClickHouse audit data (8 admin + 3 role-aware report tools). See `querys.md` for the full query reference.
 
 ### MCP authentication feature flag (`MCP_DISABLE_AUTH`)
 
@@ -80,7 +80,7 @@ The MCP server exposes 15 tools for querying ClickHouse audit data. See `querys.
 >
 > This flag exists to make local testing easier: you can connect to
 > `http://localhost:8081/mcp` with any `Authorization` header (or none at all)
-> and all 15 admin tools plus the viewer tools become reachable immediately.
+> and all 11 tools become reachable immediately.
 >
 > **`docker-compose.yml` has this flag enabled by default** (`MCP_DISABLE_AUTH:
 > "true"`) precisely so that `./start.sh up-mcp` gives you a frictionless dev
@@ -144,23 +144,46 @@ additionally reject tokens whose role is not `admin`.
 
 ### Tools available
 
-| Tool | Description |
-|------|-------------|
-| `list_tables` | List OTEL tables |
-| `recent_logs` | Recent logs with body preview |
-| `log_counts` | Log volume by service/severity |
-| `claude_events_by_type` | Claude Code event types |
-| `hook_events` | Hook events by type and tool |
-| `token_usage_detailed` | Token consumption (detailed) |
-| `token_usage_summary` | Token consumption (pivoted) |
-| `cost_by_model` | Cost in USD by model |
-| `cost_by_user` | Cost in USD by user |
-| `cost_by_session` | Cost in USD by session |
-| `recent_token_usage` | Tokens in last N minutes |
-| `available_metrics` | List available metrics |
-| `trace_spans` | Trace spans by service/name |
-| `hook_trace_duration` | Hook spans with duration |
-| `metric_attributes` | Discover metric attributes |
+| Tool | Scope | Description |
+|------|-------|-------------|
+| `recent_logs` | admin | Recent logs with body preview |
+| `log_counts` | admin | Log volume by service/severity |
+| `cost_by_model` | admin | Cost in USD by model |
+| `cost_by_session` | admin | Cost in USD by session |
+| `available_metrics` | admin | List available sum metrics |
+| `trace_spans` | admin | Trace spans by service/name |
+| `hook_trace_duration` | admin | Hook spans with duration |
+| `metric_attributes` | admin | Discover metric attributes |
+| `report_activity_timeline` | role-aware | Sessions/activity grouped by entity |
+| `report_token_usage` | role-aware | Token + cost usage by developer/model |
+| `report_developer_roi` | role-aware | ROI analysis (cost, trend, by model/repo) |
+
+### MCP Prompts
+
+In addition to tools, the MCP server exposes 7 server-side prompts (the MCP
+`prompt` primitive). Prompts surface in MCP-aware clients as
+ready-to-run slash-commands or canned actions and emit English instructions
+that guide the agent to call the right `report_*` / `cost_by_*` tool and shape
+the final report. Prompts do not execute queries themselves.
+
+| Prompt | Scope | Underlying tool(s) |
+|--------|-------|--------------------|
+| `daily_agent_standup` | authenticated | `report_activity_timeline` (24h, agent) |
+| `weekly_activity_digest` | authenticated | `report_activity_timeline` (7d) |
+| `token_and_cost_week` | authenticated | `report_token_usage` (week) |
+| `token_and_cost_month` | authenticated | `report_token_usage` (month or custom range) |
+| `cost_drilldown_repository` | authenticated | `report_token_usage` + `cost_by_session` (admin only) |
+| `roi_executive_snapshot` | authenticated | `report_developer_roi` |
+| `compare_developers_cost` | admin | `report_developer_roi` (no developer filter) |
+
+Role rules:
+
+- Viewers see 6 prompts; `compare_developers_cost` is admin-only and hidden
+  from `prompts/list` for non-admins (and rejected if called directly).
+- For role-aware prompts, the rendered text forces `developer="<viewer email>"`
+  for viewers so the agent cannot fan out across other developers.
+- Unauthenticated callers receive an empty prompt list and an `unauthorized`
+  error on `prompts/get`.
 
 ### Claude Code: Streamable HTTP (default in `.mcp.json`)
 
