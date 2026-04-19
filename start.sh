@@ -36,7 +36,10 @@ up() {
 
 down() {
   echo "Stopping and removing containers, network, volumes and local images..."
-  run_compose down --volumes --remove-orphans --rmi local
+  # Include all compose profiles so services like mcp-server (profile: mcp) are
+  # stopped before --rmi local / network removal; otherwise those resources stay
+  # "in use" and Docker prints warnings.
+  run_compose --profile mcp down --volumes --remove-orphans --rmi local
   echo "Environment removed."
 }
 
@@ -64,7 +67,7 @@ usage() {
 Usage:
   ./start.sh up        # start full environment (clickhouse + collector + audit-service)
   ./start.sh up-mcp    # start everything + MCP server (Streamable HTTP on /mcp port 8081)
-  ./start.sh down      # stop and remove containers/volumes/local images
+  ./start.sh down      # stop all project containers (incl. MCP profile), volumes, local images
   ./start.sh restart   # restart everything
   ./start.sh status    # show service status
   ./start.sh logs      # follow logs
