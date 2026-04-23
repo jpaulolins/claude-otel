@@ -30,3 +30,4 @@ cover.out
 *.log
 tmp/
 temp/
+.worktrees/
