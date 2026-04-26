@@ -1,0 +1,12 @@
+{
+  "mcp": {
+    "claude-otel": {
+      "type": "remote",
+      "url": "http://localhost:8081/mcp",
+      "headers": {
+        "Authorization": "Bearer CHANGE_ME"
+      },
+      "enabled": true
+    }
+  }
+}

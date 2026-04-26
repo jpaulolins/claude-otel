@@ -1,0 +1,13 @@
+# Codex CLI project configuration
+# Place at .codex/config.toml in your project root (project-level)
+# or at ~/.codex/config.toml (user-level, applies to all projects).
+#
+# Verify the exact key names against the official reference:
+# https://developers.openai.com/codex/local-config
+
+[mcp_servers.claude-otel]
+url     = "http://localhost:8081/mcp"
+enabled = true
+
+[mcp_servers.claude-otel.headers]
+Authorization = "Bearer CHANGE_ME"

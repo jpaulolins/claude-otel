@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "claude-otel": {
+      "url": "http://localhost:8081/mcp",
+      "headers": {
+        "Authorization": "Bearer CHANGE_ME"
+      }
+    }
+  }
+}

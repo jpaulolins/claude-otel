@@ -1,0 +1,65 @@
+{
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA": "1",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_TRACES_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
+    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer CHANGE_ME",
+    "OTEL_SERVICE_NAME": "claude-code",
+    "CLAUDE_HOOK_TOKEN": "CHANGE_ME"
+  },
+  "forceRemoteSettingsRefresh": true,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://localhost:8080/hooks/pre-tool-use",
+            "timeout": 10,
+            "headers": {
+              "Authorization": "Bearer $CLAUDE_HOOK_TOKEN"
+            },
+            "allowedEnvVars": ["CLAUDE_HOOK_TOKEN"]
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://localhost:8080/hooks/post-tool-use",
+            "timeout": 10,
+            "headers": {
+              "Authorization": "Bearer $CLAUDE_HOOK_TOKEN"
+            },
+            "allowedEnvVars": ["CLAUDE_HOOK_TOKEN"]
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "http",
+            "url": "http://localhost:8080/hooks/post-tool-use-failure",
+            "timeout": 10,
+            "headers": {
+              "Authorization": "Bearer $CLAUDE_HOOK_TOKEN"
+            },
+            "allowedEnvVars": ["CLAUDE_HOOK_TOKEN"]
+          }
+        ]
+      }
+    ]
+  }
+}
