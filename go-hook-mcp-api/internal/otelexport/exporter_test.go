@@ -1,6 +1,7 @@
 package otelexport
 
 import (
+	"context"
 	"testing"
 )
 
@@ -45,5 +46,27 @@ func TestParseHeaders_WithSpaces(t *testing.T) {
 	}
 	if h["key2"] != "value2" {
 		t.Errorf("key2 = %q; want %q", h["key2"], "value2")
+	}
+}
+
+func TestSetupSync_ReturnsProviders(t *testing.T) {
+	ctx := context.Background()
+	cfg := Config{
+		ServiceName:  "test-sync",
+		OTLPEndpoint: "http://localhost:14318",
+	}
+	providers, cleanup, err := SetupSync(ctx, cfg)
+	if err != nil {
+		t.Fatalf("SetupSync: %v", err)
+	}
+	defer cleanup()
+	if providers == nil {
+		t.Fatal("providers is nil")
+	}
+	if providers.TracerProvider == nil {
+		t.Fatal("TracerProvider is nil")
+	}
+	if providers.LoggerProvider == nil {
+		t.Fatal("LoggerProvider is nil")
 	}
 }

@@ -35,21 +35,6 @@ services:
     volumes:
       - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
 
-  audit-service:
-    build:
-      context: ./go-hook-mcp-api
-      dockerfile: Dockerfile.audit-service
-    container_name: audit-service
-    depends_on:
-      - otel-collector
-    environment:
-      OTEL_SERVICE_NAME: claude-audit-service
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-      OTEL_EXPORTER_OTLP_HEADERS: Authorization=Bearer CHANGE_ME
-      AUDIT_API_TOKEN: CHANGE_ME
-    ports:
-      - "8080:8080"
-
   mcp-server:
     build:
       context: ./go-hook-mcp-api

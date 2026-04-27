@@ -8,55 +8,42 @@
     "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
     "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4318",
     "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer CHANGE_ME",
-    "OTEL_SERVICE_NAME": "claude-code",
-    "CLAUDE_HOOK_TOKEN": "CHANGE_ME"
+    "OTEL_SERVICE_NAME": "claude-code"
   },
   "forceRemoteSettingsRefresh": true,
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": ".*",
         "hooks": [
           {
-            "type": "http",
-            "url": "http://localhost:8080/hooks/pre-tool-use",
-            "timeout": 10,
-            "headers": {
-              "Authorization": "Bearer $CLAUDE_HOOK_TOKEN"
-            },
-            "allowedEnvVars": ["CLAUDE_HOOK_TOKEN"]
+            "type": "command",
+            "command": "cotel hook",
+            "timeout": 5
           }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": ".*",
         "hooks": [
           {
-            "type": "http",
-            "url": "http://localhost:8080/hooks/post-tool-use",
-            "timeout": 10,
-            "headers": {
-              "Authorization": "Bearer $CLAUDE_HOOK_TOKEN"
-            },
-            "allowedEnvVars": ["CLAUDE_HOOK_TOKEN"]
+            "type": "command",
+            "command": "cotel hook",
+            "timeout": 5
           }
         ]
       }
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "Bash",
+        "matcher": ".*",
         "hooks": [
           {
-            "type": "http",
-            "url": "http://localhost:8080/hooks/post-tool-use-failure",
-            "timeout": 10,
-            "headers": {
-              "Authorization": "Bearer $CLAUDE_HOOK_TOKEN"
-            },
-            "allowedEnvVars": ["CLAUDE_HOOK_TOKEN"]
+            "type": "command",
+            "command": "cotel hook",
+            "timeout": 5
           }
         ]
       }

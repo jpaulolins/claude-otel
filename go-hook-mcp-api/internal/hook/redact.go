@@ -1,4 +1,4 @@
-package audit
+package hook
 
 import "regexp"
 

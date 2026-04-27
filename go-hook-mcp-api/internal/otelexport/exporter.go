@@ -3,6 +3,7 @@ package otelexport
 import (
 	"context"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel"
@@ -84,6 +85,54 @@ func Setup(ctx context.Context, cfg Config) (*Providers, func(), error) {
 	cleanup := func() {
 		_ = tp.Shutdown(context.Background())
 		_ = lp.Shutdown(context.Background())
+	}
+
+	return &Providers{TracerProvider: tp, LoggerProvider: lp}, cleanup, nil
+}
+
+func SetupSync(ctx context.Context, cfg Config) (*Providers, func(), error) {
+	headers := ParseHeaders(cfg.OTLPHeaders)
+
+	res, err := resource.New(ctx,
+		resource.WithAttributes(semconv.ServiceName(cfg.ServiceName)),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	traceOpts := []otlptracehttp.Option{
+		otlptracehttp.WithEndpointURL(cfg.OTLPEndpoint + "/v1/traces"),
+		otlptracehttp.WithHeaders(headers),
+	}
+	traceExp, err := otlptracehttp.New(ctx, traceOpts...)
+	if err != nil {
+		return nil, nil, err
+	}
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithResource(res),
+		sdktrace.WithSyncer(traceExp),
+	)
+	otel.SetTracerProvider(tp)
+
+	logOpts := []otlploghttp.Option{
+		otlploghttp.WithEndpointURL(cfg.OTLPEndpoint + "/v1/logs"),
+		otlploghttp.WithHeaders(headers),
+	}
+	logExp, err := otlploghttp.New(ctx, logOpts...)
+	if err != nil {
+		_ = tp.Shutdown(ctx)
+		return nil, nil, err
+	}
+	lp := sdklog.NewLoggerProvider(
+		sdklog.WithResource(res),
+		sdklog.WithProcessor(sdklog.NewSimpleProcessor(logExp)),
+	)
+
+	cleanup := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = tp.Shutdown(ctx)
+		_ = lp.Shutdown(ctx)
 	}
 
 	return &Providers{TracerProvider: tp, LoggerProvider: lp}, cleanup, nil

@@ -2,8 +2,8 @@
 # seed-data.sh — Generate realistic telemetry data for all OTEL tables.
 #
 # Populates:
-#   otel_logs            — via audit-service hook endpoints
-#   otel_traces          — via audit-service hook endpoints (span per hook)
+#   otel_logs            — via cotel hook command
+#   otel_traces          — via cotel hook command (span per hook)
 #   otel_traces_trace_id_ts — materialized view (auto-populated from otel_traces)
 #   otel_metrics_sum     — via OTLP HTTP /v1/metrics (Sum metrics)
 #   otel_metrics_gauge   — via OTLP HTTP /v1/metrics (Gauge metrics)
@@ -137,7 +137,6 @@ check_service() {
 }
 
 log_info "Checking services..."
-check_service "audit-service" "$AUDIT_URL/healthz" || exit 1
 check_service "otel-collector" "$OTLP_URL/v1/metrics" || true  # collector may return 405 on GET, that's ok
 
 echo ""
@@ -655,18 +654,18 @@ else
   log_warn "otel_logs distinct organization_id=${logs_orgs:-0} (expected ==1) — query: SELECT uniqExact(JSONExtractString(Body,'organization_id')) FROM observability.otel_logs"
 fi
 
-# 2. otel_traces: total > 0, contains audit service
+# 2. otel_traces: total > 0, contains cotel-detect service
 traces_total=$(check_query "SELECT count() FROM observability.otel_traces")
-traces_has_audit=$(check_query "SELECT count() FROM observability.otel_traces WHERE ServiceName = 'claude-audit-service'")
+traces_has_audit=$(check_query "SELECT count() FROM observability.otel_traces WHERE ServiceName = 'cotel-detect'")
 if [[ -n "$traces_total" && "$traces_total" -gt 0 ]] 2>/dev/null; then
   log_ok "otel_traces rows: $traces_total"
 else
   log_warn "otel_traces is empty — query: SELECT count() FROM observability.otel_traces"
 fi
 if [[ -n "$traces_has_audit" && "$traces_has_audit" -gt 0 ]] 2>/dev/null; then
-  log_ok "otel_traces has ServiceName='claude-audit-service' rows: $traces_has_audit"
+  log_ok "otel_traces has ServiceName='cotel-detect' rows: $traces_has_audit"
 else
-  log_warn "otel_traces missing claude-audit-service spans — query: SELECT count() FROM observability.otel_traces WHERE ServiceName='claude-audit-service'"
+  log_warn "otel_traces missing cotel-detect spans — query: SELECT count() FROM observability.otel_traces WHERE ServiceName='cotel-detect'"
 fi
 
 # 3. otel_metrics_sum: per-MetricName count + distinct repository attr > 1

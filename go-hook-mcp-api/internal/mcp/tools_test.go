@@ -338,7 +338,7 @@ func TestTimeline_SourceAgent(t *testing.T) {
 	defer cleanup()
 
 	callTool(t, cs, "report_activity_timeline", map[string]any{"source": "agent"})
-	if !strings.Contains(mq.lastSQL, "ServiceName = 'claude-audit-service'") {
+	if !strings.Contains(mq.lastSQL, "ServiceName = 'cotel-detect'") {
 		t.Errorf("expected ServiceName filter; got %q", mq.lastSQL)
 	}
 }

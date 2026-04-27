@@ -65,7 +65,7 @@ up_mcp() {
 usage() {
   cat <<'EOF'
 Usage:
-  ./start.sh up        # start full environment (clickhouse + collector + audit-service)
+  ./start.sh up        # start full environment (clickhouse + collector)
   ./start.sh up-mcp    # start everything + MCP server (Streamable HTTP on /mcp port 8081)
   ./start.sh down      # stop all project containers (incl. MCP profile), volumes, local images
   ./start.sh restart   # restart everything
