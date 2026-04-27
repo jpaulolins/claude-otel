@@ -15,18 +15,27 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-AUDIT_TOKEN="${AUDIT_API_TOKEN:-CHANGE_ME}"
-AUDIT_URL="${AUDIT_SERVICE_URL:-http://localhost:8080}"
 OTLP_URL="${OTLP_ENDPOINT:-http://localhost:4318}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --token)   AUDIT_TOKEN="$2"; shift 2 ;;
-    --audit-url) AUDIT_URL="$2"; shift 2 ;;
     --otlp-url)  OTLP_URL="$2"; shift 2 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
+
+# Locate cotel binary.
+COTEL_BIN="${COTEL_BIN:-}"
+if [[ -z "$COTEL_BIN" ]]; then
+  if command -v cotel &>/dev/null; then
+    COTEL_BIN="cotel"
+  elif [[ -x "$(dirname "$0")/go-hook-mcp-api/bin/cotel" ]]; then
+    COTEL_BIN="$(dirname "$0")/go-hook-mcp-api/bin/cotel"
+  else
+    printf '\033[0;31m[ERROR]\033[0m cotel binary not found. Run: cd go-hook-mcp-api && make build\n'
+    exit 1
+  fi
+fi
 
 # ---------------------------------------------------------------------------
 # Data pools — realistic values for variety
@@ -127,8 +136,12 @@ uuid_like() {
 # ---------------------------------------------------------------------------
 check_service() {
   local name=$1 url=$2
-  if curl -sf -o /dev/null "$url" 2>/dev/null; then
-    log_ok "$name is reachable at $url"
+  # Accept any HTTP response (including 405 Method Not Allowed from the OTEL
+  # collector on GET /v1/metrics) — we just need the port to be reachable.
+  local code
+  code=$(curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null) || true
+  if [[ -n "$code" && "$code" != "000" ]]; then
+    log_ok "$name is reachable at $url (HTTP $code)"
     return 0
   else
     log_err "$name is NOT reachable at $url"
@@ -137,7 +150,7 @@ check_service() {
 }
 
 log_info "Checking services..."
-check_service "otel-collector" "$OTLP_URL/v1/metrics" || true  # collector may return 405 on GET, that's ok
+check_service "otel-collector" "$OTLP_URL/v1/metrics" || true
 
 echo ""
 log_info "======================================"
@@ -149,20 +162,19 @@ echo ""
 # 1. HOOK EVENTS → otel_logs + otel_traces + otel_traces_trace_id_ts
 # ---------------------------------------------------------------------------
 send_hook() {
-  local endpoint=$1
+  local endpoint=$1  # kept for log messages; no longer used for routing
   local payload=$2
-  local resp
-  resp=$(curl -sf -w "\n%{http_code}" -X POST "$AUDIT_URL/hooks/$endpoint" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $AUDIT_TOKEN" \
-    -d "$payload" 2>&1) || true
-  local code
-  code=$(echo "$resp" | tail -1)
-  if [[ "$code" == "200" ]]; then
+  local rc=0
+  printf '%s' "$payload" | \
+    OTEL_EXPORTER_OTLP_ENDPOINT="$OTLP_URL" \
+    OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf" \
+    OTEL_SERVICE_NAME="cotel-detect" \
+    "$COTEL_BIN" hook >/dev/null 2>&1 || rc=$?
+  if [[ $rc -eq 0 ]]; then
     HOOKS_SENT=$((HOOKS_SENT + 1))
     return 0
   else
-    log_err "Hook $endpoint failed (HTTP $code)"
+    log_err "Hook $endpoint failed (cotel exit $rc)"
     return 1
   fi
 }
@@ -656,14 +668,14 @@ fi
 
 # 2. otel_traces: total > 0, contains cotel-detect service
 traces_total=$(check_query "SELECT count() FROM observability.otel_traces")
-traces_has_audit=$(check_query "SELECT count() FROM observability.otel_traces WHERE ServiceName = 'cotel-detect'")
+traces_has_cotel=$(check_query "SELECT count() FROM observability.otel_traces WHERE ServiceName = 'cotel-detect'")
 if [[ -n "$traces_total" && "$traces_total" -gt 0 ]] 2>/dev/null; then
   log_ok "otel_traces rows: $traces_total"
 else
   log_warn "otel_traces is empty — query: SELECT count() FROM observability.otel_traces"
 fi
-if [[ -n "$traces_has_audit" && "$traces_has_audit" -gt 0 ]] 2>/dev/null; then
-  log_ok "otel_traces has ServiceName='cotel-detect' rows: $traces_has_audit"
+if [[ -n "$traces_has_cotel" && "$traces_has_cotel" -gt 0 ]] 2>/dev/null; then
+  log_ok "otel_traces has ServiceName='cotel-detect' rows: $traces_has_cotel"
 else
   log_warn "otel_traces missing cotel-detect spans — query: SELECT count() FROM observability.otel_traces WHERE ServiceName='cotel-detect'"
 fi

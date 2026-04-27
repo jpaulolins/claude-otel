@@ -251,12 +251,12 @@ func registerAdminTools(s *sdk.Server, q Querier) {
 	addTool(s,
 		&sdk.Tool{
 			Name:        "hook_trace_duration",
-			Description: "[admin] Recent audit-service hook spans with duration in milliseconds",
+			Description: "[admin] Recent hook spans (cotel-detect or claude-audit-service) with duration in milliseconds",
 			InputSchema: intSchema("limit", "Number of spans to return (default 10)"),
 		},
 		adminToolFn(func(ctx context.Context, args Args) (*sdk.CallToolResult, any, error) {
 			limit := clampInt(getInt(args, "limit", 10), 1, 10000)
-			query := fmt.Sprintf(`SELECT Timestamp, SpanName, round(Duration / 1e6, 2) AS duration_ms, StatusCode FROM observability.otel_traces WHERE ServiceName = 'cotel-detect' ORDER BY Timestamp DESC LIMIT %d`, limit)
+			query := fmt.Sprintf(`SELECT Timestamp, SpanName, round(Duration / 1e6, 2) AS duration_ms, StatusCode FROM observability.otel_traces WHERE ServiceName IN ('cotel-detect', 'claude-audit-service') ORDER BY Timestamp DESC LIMIT %d`, limit)
 			return execQuery(ctx, q, query)
 		}),
 	)
@@ -355,7 +355,7 @@ func registerReportTools(s *sdk.Server, q Querier) {
 			forcedFilter := !u.IsAdmin()
 
 			where := []string{
-				"ServiceName = 'cotel-detect'",
+				"ServiceName IN ('cotel-detect', 'claude-audit-service')",
 				fmt.Sprintf("Timestamp > %s", sinceExpr),
 			}
 			if repository != "" && repository != "all" {
