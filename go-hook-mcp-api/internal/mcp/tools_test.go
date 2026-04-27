@@ -338,8 +338,8 @@ func TestTimeline_SourceAgent(t *testing.T) {
 	defer cleanup()
 
 	callTool(t, cs, "report_activity_timeline", map[string]any{"source": "agent"})
-	if !strings.Contains(mq.lastSQL, "ServiceName IN ('cotel-detect', 'claude-audit-service')") {
-		t.Errorf("expected ServiceName IN filter; got %q", mq.lastSQL)
+	if !strings.Contains(mq.lastSQL, "ServiceName = 'claude-code'") {
+		t.Errorf("expected ServiceName = 'claude-code' filter; got %q", mq.lastSQL)
 	}
 }
 
@@ -418,8 +418,8 @@ func TestTimeline_GroupIdFilter(t *testing.T) {
 	defer cleanup()
 
 	callTool(t, cs, "report_activity_timeline", map[string]any{"group_id": "org_X"})
-	if !strings.Contains(mq.lastSQL, "organization_id") {
-		t.Errorf("expected organization_id filter; got %q", mq.lastSQL)
+	if !strings.Contains(mq.lastSQL, "organization.id") {
+		t.Errorf("expected organization.id filter; got %q", mq.lastSQL)
 	}
 	if !strings.Contains(mq.lastSQL, "= 'org_X'") {
 		t.Errorf("expected group_id value; got %q", mq.lastSQL)
@@ -432,8 +432,8 @@ func TestTimeline_GroupIdAll_NoFilter(t *testing.T) {
 	defer cleanup()
 
 	callTool(t, cs, "report_activity_timeline", map[string]any{"group_id": "all"})
-	if strings.Contains(mq.lastSQL, "organization_id") {
-		t.Errorf("expected no organization_id filter for 'all'; got %q", mq.lastSQL)
+	if strings.Contains(mq.lastSQL, "organization.id") {
+		t.Errorf("expected no organization.id filter for 'all'; got %q", mq.lastSQL)
 	}
 }
 
@@ -487,16 +487,13 @@ func TestTimeline_ViewerScoped_ForcesActorFilter(t *testing.T) {
 	defer cleanup()
 
 	callTool(t, cs, "report_activity_timeline", nil)
-	// BL-H4: the viewer filter is now a lowercased OR on Body.user_id and
-	// Attributes['user.email'].
+	// Viewer filter is a lowercased match on LogAttributes['user.email'] from
+	// the claude-code service logs.
 	if !strings.Contains(mq.lastSQL, "'viewer@test.com'") {
 		t.Errorf("expected viewer email in SQL; got %q", mq.lastSQL)
 	}
-	if !strings.Contains(mq.lastSQL, "lower(JSONExtractString(Body, 'user_id'))") {
-		t.Errorf("expected lowercased Body.user_id filter; got %q", mq.lastSQL)
-	}
-	if !strings.Contains(mq.lastSQL, "lower(Attributes['user.email'])") {
-		t.Errorf("expected lowercased Attributes[user.email] filter; got %q", mq.lastSQL)
+	if !strings.Contains(mq.lastSQL, "lower(LogAttributes['user.email'])") {
+		t.Errorf("expected lowercased LogAttributes[user.email] filter; got %q", mq.lastSQL)
 	}
 }
 
@@ -506,11 +503,8 @@ func TestTimeline_AdminCrossUser(t *testing.T) {
 	defer cleanup()
 
 	callTool(t, cs, "report_activity_timeline", nil)
-	if strings.Contains(mq.lastSQL, "'user_id') = ") {
-		t.Errorf("admin should not have user_id filter; got %q", mq.lastSQL)
-	}
-	if strings.Contains(mq.lastSQL, "lower(JSONExtractString(Body, 'user_id'))") {
-		t.Errorf("admin should not have a lowercased user_id filter either; got %q", mq.lastSQL)
+	if strings.Contains(mq.lastSQL, "lower(LogAttributes['user.email']) = '") {
+		t.Errorf("admin should not have a developer filter when none requested; got %q", mq.lastSQL)
 	}
 }
 
@@ -521,8 +515,8 @@ func TestTimeline_AdminDeveloperArg_AppliesFilter(t *testing.T) {
 	defer cleanup()
 
 	callTool(t, cs, "report_activity_timeline", map[string]any{"developer": "alice@x.com"})
-	if !strings.Contains(mq.lastSQL, "lower(JSONExtractString(Body, 'user_id'))") {
-		t.Errorf("expected lowercased Body.user_id filter; got %q", mq.lastSQL)
+	if !strings.Contains(mq.lastSQL, "lower(LogAttributes['user.email'])") {
+		t.Errorf("expected lowercased LogAttributes[user.email] filter; got %q", mq.lastSQL)
 	}
 	if !strings.Contains(mq.lastSQL, "'alice@x.com'") {
 		t.Errorf("expected alice email literal; got %q", mq.lastSQL)

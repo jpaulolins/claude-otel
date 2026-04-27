@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"go-hook-mcp-api/internal/detect"
@@ -72,8 +73,14 @@ func runHook(args []string) int {
 	}
 	result := inspector.Inspect(ctx, input)
 
-	// Emit OTEL spans only when an endpoint is configured.
-	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	// Emit OTEL spans only when an endpoint can be resolved. Resolution order:
+	//   1. OTEL_EXPORTER_OTLP_ENDPOINT — set by Claude Code in the inherited env.
+	//   2. .gemini/settings.json telemetry.otlpEndpoint — Gemini CLI configures
+	//      its own SDK from this file but does NOT propagate the endpoint as an
+	//      env var to hook subprocesses. Discovered via $GEMINI_PROJECT_DIR.
+	// If neither is set, the hook still runs and returns 0/2 — telemetry is
+	// just skipped.
+	endpoint := envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", discoverGeminiOTLPEndpoint())
 	if endpoint != "" {
 		cfg := otelexport.Config{
 			ServiceName:  envOrDefault("OTEL_SERVICE_NAME", "cotel-detect"),
@@ -225,4 +232,71 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// discoverGeminiOTLPEndpoint walks the Gemini settings search path and returns
+// the first telemetry.otlpEndpoint it finds with telemetry.enabled=true.
+// Returns "" when no usable settings are found.
+//
+// This exists because Gemini CLI configures its OTEL SDK from settings.json
+// internally and does not export OTEL_* / GEMINI_TELEMETRY_* env vars to hook
+// subprocesses, so cotel cannot otherwise discover where to send spans.
+func discoverGeminiOTLPEndpoint() string {
+	for _, root := range geminiSearchRoots() {
+		if ep := readGeminiOTLPEndpoint(root); ep != "" {
+			return ep
+		}
+	}
+	return ""
+}
+
+// geminiSearchRoots returns directories to scan for .gemini/settings.json in
+// priority order:
+//
+//  1. $GEMINI_PROJECT_DIR — Gemini CLI sets this on hook subprocesses.
+//  2. Current working directory — project-scoped settings.
+//  3. User home directory — Gemini's user-level config (~/.gemini/settings.json).
+//
+// Cross-platform note: os.UserHomeDir() returns $HOME on Unix and %USERPROFILE%
+// on Windows, and filepath.Join uses the platform's path separator, so this
+// works identically on macOS, Linux, and Windows without OS-specific branches.
+func geminiSearchRoots() []string {
+	var roots []string
+	if v := os.Getenv("GEMINI_PROJECT_DIR"); v != "" {
+		roots = append(roots, v)
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		roots = append(roots, cwd)
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		roots = append(roots, home)
+	}
+	return roots
+}
+
+// readGeminiOTLPEndpoint reads <root>/.gemini/settings.json and returns
+// telemetry.otlpEndpoint when telemetry.enabled is true. Returns "" on any
+// error (missing file, malformed JSON, telemetry disabled, empty endpoint).
+func readGeminiOTLPEndpoint(root string) string {
+	if root == "" {
+		return ""
+	}
+	path := filepath.Join(root, ".gemini", "settings.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var s struct {
+		Telemetry struct {
+			Enabled      bool   `json:"enabled"`
+			OTLPEndpoint string `json:"otlpEndpoint"`
+		} `json:"telemetry"`
+	}
+	if err := json.Unmarshal(data, &s); err != nil {
+		return ""
+	}
+	if !s.Telemetry.Enabled || s.Telemetry.OTLPEndpoint == "" {
+		return ""
+	}
+	return s.Telemetry.OTLPEndpoint
 }

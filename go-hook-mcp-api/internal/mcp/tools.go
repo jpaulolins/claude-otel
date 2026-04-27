@@ -251,12 +251,12 @@ func registerAdminTools(s *sdk.Server, q Querier) {
 	addTool(s,
 		&sdk.Tool{
 			Name:        "hook_trace_duration",
-			Description: "[admin] Recent hook spans (cotel-detect or claude-audit-service) with duration in milliseconds",
+			Description: "[admin] Recent cotel hook spans with duration in milliseconds",
 			InputSchema: intSchema("limit", "Number of spans to return (default 10)"),
 		},
 		adminToolFn(func(ctx context.Context, args Args) (*sdk.CallToolResult, any, error) {
 			limit := clampInt(getInt(args, "limit", 10), 1, 10000)
-			query := fmt.Sprintf(`SELECT Timestamp, SpanName, round(Duration / 1e6, 2) AS duration_ms, StatusCode FROM observability.otel_traces WHERE ServiceName IN ('cotel-detect', 'claude-audit-service') ORDER BY Timestamp DESC LIMIT %d`, limit)
+			query := fmt.Sprintf(`SELECT Timestamp, ServiceName, SpanName, round(Duration / 1e6, 2) AS duration_ms, StatusCode FROM observability.otel_traces WHERE SpanName LIKE 'cotel.hook.%%' ORDER BY Timestamp DESC LIMIT %d`, limit)
 			return execQuery(ctx, q, query)
 		}),
 	)
@@ -355,27 +355,26 @@ func registerReportTools(s *sdk.Server, q Querier) {
 			forcedFilter := !u.IsAdmin()
 
 			where := []string{
-				"ServiceName IN ('cotel-detect', 'claude-audit-service')",
+				"ServiceName = 'claude-code'",
+				"Body IN ('claude_code.tool_decision', 'claude_code.tool_result')",
 				fmt.Sprintf("Timestamp > %s", sinceExpr),
 			}
 			if repository != "" && repository != "all" {
-				where = append(where, fmt.Sprintf("JSONExtractString(Body, 'repository') = '%s'", escapeSQL(repository)))
+				where = append(where, fmt.Sprintf("LogAttributes['repository'] = '%s'", escapeSQL(repository)))
 			}
 			if groupID != "" && groupID != "all" {
-				where = append(where, fmt.Sprintf("JSONExtractString(Body, 'organization_id') = '%s'", escapeSQL(groupID)))
+				where = append(where, fmt.Sprintf("LogAttributes['organization.id'] = '%s'", escapeSQL(groupID)))
 			}
-			// BL-H4: match on both Body.user_id and Attributes['user.email']
-			// (lower-cased) for defense-in-depth.
 			if developerArg != "" && developerArg != "all" {
 				lowered := strings.ToLower(developerArg)
 				where = append(where, fmt.Sprintf(
-					"(lower(JSONExtractString(Body, 'user_id')) = '%s' OR lower(Attributes['user.email']) = '%s')",
-					escapeSQL(lowered), escapeSQL(lowered),
+					"lower(LogAttributes['user.email']) = '%s'",
+					escapeSQL(lowered),
 				))
 			}
 
 			query := fmt.Sprintf(
-				`SELECT 'session' AS type, JSONExtractString(Body, 'session_id') AS id, JSONExtractString(Body, 'repository') AS repository, min(Timestamp) AS first_seen, max(Timestamp) AS last_seen, groupUniqArray(JSONExtractString(Body, 'user_id')) AS actors, count() AS event_count, concat('tools: ', arrayStringConcat(groupUniqArray(JSONExtractString(Body, 'tool_name')), ',')) AS summary FROM observability.otel_logs WHERE %s GROUP BY id, repository ORDER BY last_seen DESC LIMIT %d`,
+				`SELECT 'session' AS type, LogAttributes['session.id'] AS id, LogAttributes['repository'] AS repository, min(Timestamp) AS first_seen, max(Timestamp) AS last_seen, groupUniqArray(LogAttributes['user.email']) AS actors, count() AS event_count, concat('tools: ', arrayStringConcat(groupUniqArray(LogAttributes['tool_name']), ',')) AS summary FROM observability.otel_logs WHERE %s GROUP BY id, repository ORDER BY last_seen DESC LIMIT %d`,
 				strings.Join(where, " AND "), maxItems,
 			)
 			rows, err := q.Query(ctx, query)

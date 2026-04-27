@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -349,5 +350,107 @@ func TestNormalize_RedactsToolResponseStreams(t *testing.T) {
 	}
 	if strings.Contains(p.ToolResponse.Stderr, "abcdefghijklmnopqrstuvwxyz123") {
 		t.Errorf("stderr not redacted: %q", p.ToolResponse.Stderr)
+	}
+}
+
+func TestUnmarshal_ClaudeSchema(t *testing.T) {
+	raw := []byte(`{
+		"event_type":"PreToolUse",
+		"session_id":"s1",
+		"tool_name":"Bash",
+		"command":"ls -la",
+		"cwd":"/repo/app"
+	}`)
+	var p HookPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.EventType != "PreToolUse" {
+		t.Errorf("event_type = %q; want PreToolUse", p.EventType)
+	}
+	if p.Command != "ls -la" {
+		t.Errorf("command = %q; want 'ls -la'", p.Command)
+	}
+}
+
+func TestUnmarshal_GeminiSchema_BeforeTool(t *testing.T) {
+	raw := []byte(`{
+		"hook_event_name":"BeforeTool",
+		"session_id":"gs1",
+		"tool_name":"run_shell_command",
+		"tool_input":{"command":"git status"},
+		"cwd":"/repo/app",
+		"transcript_path":"/tmp/t.jsonl"
+	}`)
+	var p HookPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.EventType != "PreToolUse" {
+		t.Errorf("event_type = %q; want PreToolUse (mapped from BeforeTool)", p.EventType)
+	}
+	if p.Command != "git status" {
+		t.Errorf("command = %q; want 'git status' (lifted from tool_input)", p.Command)
+	}
+	if p.SessionID != "gs1" {
+		t.Errorf("session_id = %q; want gs1", p.SessionID)
+	}
+	if p.ToolName != "run_shell_command" {
+		t.Errorf("tool_name = %q; want run_shell_command", p.ToolName)
+	}
+}
+
+func TestUnmarshal_GeminiSchema_AfterTool(t *testing.T) {
+	raw := []byte(`{
+		"hook_event_name":"AfterTool",
+		"session_id":"gs2",
+		"tool_name":"run_shell_command",
+		"tool_input":{"command":"echo hi"},
+		"tool_response":{"exit_code":0,"stdout":"hi\n","stderr":""},
+		"cwd":"/repo/app"
+	}`)
+	var p HookPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.EventType != "PostToolUse" {
+		t.Errorf("event_type = %q; want PostToolUse (mapped from AfterTool)", p.EventType)
+	}
+	if p.Command != "echo hi" {
+		t.Errorf("command = %q; want 'echo hi'", p.Command)
+	}
+	if p.ToolResponse == nil || p.ToolResponse.Stdout != "hi\n" {
+		t.Errorf("tool_response.stdout = %v; want 'hi\\n'", p.ToolResponse)
+	}
+}
+
+func TestUnmarshal_GeminiSchema_ClaudeFieldsWin(t *testing.T) {
+	// If both schemas appear, the explicit Claude fields take precedence.
+	raw := []byte(`{
+		"event_type":"PreToolUse",
+		"command":"explicit",
+		"hook_event_name":"AfterTool",
+		"tool_input":{"command":"gemini-derived"}
+	}`)
+	var p HookPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.EventType != "PreToolUse" {
+		t.Errorf("event_type = %q; Claude field should win", p.EventType)
+	}
+	if p.Command != "explicit" {
+		t.Errorf("command = %q; Claude field should win", p.Command)
+	}
+}
+
+func TestUnmarshal_GeminiSchema_UnknownEventPassesThrough(t *testing.T) {
+	raw := []byte(`{"hook_event_name":"SessionStart","session_id":"gs3"}`)
+	var p HookPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.EventType != "SessionStart" {
+		t.Errorf("event_type = %q; unknown Gemini event should pass through verbatim", p.EventType)
 	}
 }

@@ -91,19 +91,49 @@ replace `CHANGE_ME` with your token (`admin-token` for local development).
 | Client | Config to copy | Full setup |
 |--------|----------------|-----------|
 | **Claude Code** | `config-samples/claude-code/` | [docs/client-setup.md#claude-code](docs/client-setup.md#claude-code) |
+| **Gemini CLI** (≥ v0.26) | `config-samples/gemini/.gemini/settings.json` | [docs/client-setup.md#gemini-cli](docs/client-setup.md#gemini-cli) |
 | **OpenCode** | `config-samples/opencode/opencode.json` | [docs/client-setup.md#opencode](docs/client-setup.md#opencode) |
 | **Codex CLI** | `config-samples/codex/` | [docs/client-setup.md#codex-cli](docs/client-setup.md#codex-cli) |
 | **Cursor** | `config-samples/cursor/.cursor/mcp.json` | [docs/client-setup.md#cursor](docs/client-setup.md#cursor) |
-| **Gemini CLI** | `config-samples/gemini/GEMINI.md` | [docs/client-setup.md#gemini-cli](docs/client-setup.md#gemini-cli) |
 
 ```bash
 # Claude Code (full telemetry + hooks):
 cp config-samples/claude-code/.mcp.json .
 cp config-samples/claude-code/claude-managed-settings.json .
 
-# Cursor (MCP only):
+# Gemini CLI (full telemetry + hooks):
+mkdir -p .gemini && cp config-samples/gemini/.gemini/settings.json .gemini/settings.json
+
+# Cursor (MCP only — see Known limitations below):
 mkdir -p .cursor && cp config-samples/cursor/.cursor/mcp.json .cursor/mcp.json
 ```
+
+---
+
+## Known limitations
+
+End-to-end telemetry coverage varies per client. Today only **Claude Code** and
+**Gemini CLI (≥ v0.26)** ship complete: MCP + native OTEL (metrics/logs/traces)
++ tool-call hooks landing in ClickHouse via `cotel hook`. The remaining clients
+have partial coverage:
+
+- **OpenCode** — MCP works, but native OTEL signals depend on a community
+  plugin ([`@devtheops/opencode-plugin-otel`](https://github.com/DEVtheOPS/opencode-plugin-otel)).
+  Hooks via the plugin system fire for native tools but **not** for MCP tool
+  calls (upstream issue [sst/opencode#2319](https://github.com/sst/opencode/issues/2319)).
+  No first-party `cotel hook` integration yet.
+- **Cursor** — MCP works, but Cursor exposes no hook API and no OTEL
+  configuration. The only viable capture path is a local HTTP proxy
+  intercepting `api2.cursor.sh` / `repo42.cursor.sh`. Design proposal in
+  [`docs/cursor-todo-http-proxy.md`](docs/cursor-todo-http-proxy.md);
+  not yet implemented.
+- **Codex CLI** — MCP works. Native OTEL is undocumented in the CLI; no hook
+  surface. Same proxy-interceptor pattern would apply.
+
+Until those gaps close, MCP tool activity for these clients is captured
+server-side via the MCP server's own OTLP instrumentation only — there is no
+visibility into prompts, tool inputs, or token usage emitted by the client
+itself.
 
 ---
 

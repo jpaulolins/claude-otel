@@ -16,16 +16,16 @@ own metrics/logs/traces flow into the same ClickHouse database.
 
 | Client | MCP | OTEL telemetry | Hook events |
 |--------|-----|----------------|-------------|
-| Claude Code | ✓ | ✓ full (env vars + HTTP hooks) | ✓ |
-| OpenCode | ✓ | ✓ env vars (best-effort) | — |
+| Claude Code | ✓ | ✓ full (env vars) | ✓ (`PreToolUse` / `PostToolUse`) |
+| Gemini CLI (≥ v0.26) | ✓ | ✓ full (settings.json) | ✓ (`BeforeTool` / `AfterTool`) |
+| OpenCode | ✓ | ✓ via [`@devtheops/opencode-plugin-otel`](https://github.com/DEVtheOPS/opencode-plugin-otel) | ✓ via plugin (gap on MCP tool calls — issue [#2319](https://github.com/sst/opencode/issues/2319)) |
 | Codex CLI | ✓ | — (not documented) | — |
-| Cursor | ✓ | — (TODO) | — |
-| Gemini CLI | ✓ | — (TODO) | — |
+| Cursor | ✓ | — | — (see `docs/cursor-todo-http-proxy.md`) |
 
-> **TODO (Cursor & Gemini CLI):** A future release will ship a local interceptor binary
-> built from `go-hook-mcp-api/cmd/audit` that acts as an HTTP proxy between these clients
-> and their respective AI APIs. The interceptor will emit OTLP events mirroring the hook
-> payload schema already used by Claude Code. No code changes to the clients are needed.
+> **`cotel hook` accepts both Claude Code and Gemini CLI payload schemas
+> transparently.** The same binary wired into either client's hook config emits
+> identical OTEL spans, so dashboards and MCP queries work uniformly across
+> both clients with no wrapper script.
 
 ---
 
@@ -174,34 +174,53 @@ after adding or modifying the file.
 
 ## Gemini CLI
 
-MCP connection only. OTEL telemetry is not available from Gemini CLI.
+Full coverage as of Gemini CLI v0.26+: MCP, OTEL telemetry (metrics/logs/traces),
+and lifecycle hooks (`BeforeTool` / `AfterTool`).
 
-### 1. Copy context file
+### 1. Copy config files
 
 ```bash
+# Project-level settings (MCP + telemetry + hooks):
+mkdir -p .gemini
+cp config-samples/gemini/.gemini/settings.json .gemini/settings.json
+
+# Optional context file Gemini reads at startup:
 cp config-samples/gemini/GEMINI.md GEMINI.md
 ```
 
-### 2. Configure MCP in Gemini CLI settings
+### 2. Replace the token
 
-Add the server to your Gemini CLI MCP configuration. Refer to the
-[Gemini CLI documentation](https://github.com/google-gemini/gemini-cli) for the current
-config file location and format, then point it at:
-
-```
-url: http://localhost:8081/mcp
-Authorization: Bearer CHANGE_ME
-```
-
+In `.gemini/settings.json`, set `Authorization` → `Bearer <your-token>`.
 Default local development token: `admin-token`.
 
-### 3. Start Gemini CLI
+### 3. Verify `cotel` is on PATH
+
+The hooks shell out to `cotel hook`. Install the binary if not already:
+
+```bash
+cd go-hook-mcp-api && make build
+sudo install bin/cotel /usr/local/bin/cotel
+which cotel   # should print /usr/local/bin/cotel
+```
+
+The `cotel` binary auto-detects both Claude Code and Gemini CLI hook payload
+schemas, so the same binary works for both clients without any wrapper.
+
+### 4. Start Gemini CLI
 
 ```bash
 gemini
 ```
 
-> **Telemetry:** Gemini CLI does not expose user-configurable OTEL hooks. Tool call
-> activity is captured server-side via the MCP server's OTLP instrumentation.
->
-> **TODO:** See the future interceptor plan in the [telemetry support matrix](#telemetry-support-matrix).
+### What gets captured
+
+| Signal | Source | Destination |
+|--------|--------|-------------|
+| Metrics (`gemini_cli.token.usage`, `tool.call.*`, `api.request.*`) | Gemini CLI native OTEL | otel-collector → ClickHouse |
+| Logs (`gemini_cli.user_prompt`, `tool_call`, `api_response`, …) | Gemini CLI native OTEL | otel-collector → ClickHouse |
+| Traces (`tool_call`, `llm_call`, `user_prompt`) | Gemini CLI native OTEL (when `traces: true`) | otel-collector → ClickHouse |
+| Hook events (`BeforeTool` / `AfterTool`) | Gemini hook → `cotel hook` | otel-collector → ClickHouse |
+
+> **Note:** Gemini CLI uses `GEMINI_TELEMETRY_*` env vars (not the standard
+> `OTEL_*` names). The `settings.json` shipped here keeps the equivalent config
+> in the file's `telemetry` block so no shell exports are needed.

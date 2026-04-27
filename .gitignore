@@ -11,8 +11,11 @@
 *.key
 go-hook-mcp-api/mcp-users.json
 
-# Claude/Cursor local state
+# Claude/Cursor/Gemini local state
 .claude/settings.local.json
+opencode.json
+# Anchored to repo root so it does NOT match config-samples/gemini/.gemini/
+/.gemini/
 .ai-jail
 .planning/
 

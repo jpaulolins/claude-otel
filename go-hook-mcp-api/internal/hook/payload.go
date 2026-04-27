@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"path"
@@ -16,6 +17,48 @@ type ToolResponse struct {
 	ExitCode int    `json:"exit_code"`
 	Stdout   string `json:"stdout"`
 	Stderr   string `json:"stderr"`
+}
+
+// UnmarshalJSON accepts two payload shapes Claude Code emits for tool_response:
+//
+//   - Bash-style object: {"exit_code":0,"stdout":"...","stderr":"..."}
+//   - MCP-style array of content blocks: [{"type":"text","text":"..."}]
+//
+// For the MCP shape, text blocks are concatenated into Stdout. Non-text blocks
+// (images, resource links) are ignored. ExitCode defaults to 0.
+func (tr *ToolResponse) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	switch trimmed[0] {
+	case '{':
+		type alias ToolResponse
+		var obj alias
+		if err := json.Unmarshal(data, &obj); err != nil {
+			return err
+		}
+		*tr = ToolResponse(obj)
+		return nil
+	case '[':
+		var blocks []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(data, &blocks); err != nil {
+			return err
+		}
+		var sb strings.Builder
+		for _, b := range blocks {
+			if b.Type == "text" {
+				sb.WriteString(b.Text)
+			}
+		}
+		tr.Stdout = sb.String()
+		return nil
+	default:
+		return fmt.Errorf("tool_response: unsupported JSON shape: %s", trimmed[:1])
+	}
 }
 
 // HookPayload is the JSON body received from the Claude Code hook. It carries
@@ -50,6 +93,57 @@ type HookPayload struct {
 	// organization.id attribute emitted on metrics). Optional; propagated
 	// verbatim so queries can use JSONExtractString(Body, 'organization_id').
 	OrganizationID string `json:"organization_id,omitempty"`
+}
+
+// UnmarshalJSON accepts the Claude Code hook payload schema (canonical) and
+// transparently remaps the Gemini CLI hook schema onto it:
+//
+//   - Claude:  {"event_type":"PreToolUse"|"PostToolUse", "command":"...", ...}
+//   - Gemini:  {"hook_event_name":"BeforeTool"|"AfterTool", "tool_input":{"command":"..."}, ...}
+//
+// Mapping rules (Gemini → canonical), applied only when the Claude field is
+// empty so explicit Claude payloads always win:
+//
+//   - hook_event_name "BeforeTool"  → event_type "PreToolUse"
+//   - hook_event_name "AfterTool"   → event_type "PostToolUse"
+//   - any other hook_event_name     → event_type passes through verbatim
+//   - tool_input.command            → command
+//
+// Fields the two schemas already share (session_id, tool_name, cwd,
+// transcript_path, tool_response) decode normally without any remapping.
+func (p *HookPayload) UnmarshalJSON(data []byte) error {
+	type alias HookPayload
+	var canonical alias
+	if err := json.Unmarshal(data, &canonical); err != nil {
+		return err
+	}
+	*p = HookPayload(canonical)
+
+	var gemini struct {
+		HookEventName string          `json:"hook_event_name"`
+		ToolInput     json.RawMessage `json:"tool_input"`
+	}
+	_ = json.Unmarshal(data, &gemini)
+
+	if p.EventType == "" && gemini.HookEventName != "" {
+		switch gemini.HookEventName {
+		case "BeforeTool":
+			p.EventType = "PreToolUse"
+		case "AfterTool":
+			p.EventType = "PostToolUse"
+		default:
+			p.EventType = gemini.HookEventName
+		}
+	}
+	if p.Command == "" && len(gemini.ToolInput) > 0 {
+		var ti struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal(gemini.ToolInput, &ti); err == nil {
+			p.Command = ti.Command
+		}
+	}
+	return nil
 }
 
 // repoNameRe constrains what we allow as a Repository value. If the derived
