@@ -567,8 +567,11 @@ func runDeveloperROI(ctx context.Context, q Querier, u User, args Args) (*sdk.Ca
 	activeRows, err := q.Query(ctx, fmt.Sprintf(
 		`SELECT developer, sum(v) AS active_seconds FROM (
 			SELECT Attributes['user.email'] AS developer, max(Value) AS v
-			FROM observability.otel_metrics_gauge
-			WHERE %s
+			FROM (
+				SELECT Attributes, Value, TimeUnix FROM observability.otel_metrics_gauge WHERE %[1]s
+				UNION ALL
+				SELECT Attributes, Value, TimeUnix FROM observability.otel_metrics_sum WHERE %[1]s
+			)
 			GROUP BY
 				developer,
 				coalesce(nullIf(Attributes['session.id'], ''), concat('ts:', toString(TimeUnix))),

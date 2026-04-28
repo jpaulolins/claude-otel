@@ -592,7 +592,13 @@ CH_URL="http://localhost:8123"
 CH_AUTH="--user otel_ingest:CHANGE_ME"
 
 query_ch() {
-  curl -sf "$CH_URL" $CH_AUTH --data-urlencode "query=$1" 2>/dev/null
+  # --get: converts --data-urlencode into a URL query-string (?query=...) so
+  # ClickHouse receives a standard GET request with the SQL as a URL parameter.
+  # Without --get, curl sends "query=SELECT..." as a POST body and ClickHouse
+  # tries to execute "query=SELECT..." as raw SQL, causing a syntax error.
+  # || true: bash 5.2+ exits on a failing command substitution with set -e;
+  # suppress so a ClickHouse error logs a WARN instead of aborting the script.
+  curl -sf --get "$CH_URL" $CH_AUTH --data-urlencode "query=$1" 2>/dev/null || true
 }
 
 tables=(

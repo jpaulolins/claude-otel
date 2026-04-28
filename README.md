@@ -83,6 +83,48 @@ queries, production auth setup) see **[docs/operations.md](docs/operations.md)**
 
 ---
 
+## Metabase dashboard (optional)
+
+A pre-built Metabase dashboard can be brought up alongside the stack:
+
+```bash
+./start.sh up-metabase
+```
+
+What this does:
+
+1. Downloads the official ClickHouse Metabase driver into `metabase/plugins/`
+   (skipped if already present; see `metabase/fetch-driver.sh` to override the
+   pinned driver version with `METABASE_CLICKHOUSE_DRIVER_VERSION`).
+2. Starts the `metabase` service from `docker-compose.yml` (port 3000, app DB
+   persisted in the `metabase_data` volume).
+3. Runs `metabase/bootstrap.sh`, which creates the admin user, registers the
+   ClickHouse database, and provisions a 14-card dashboard from
+   `metabase/cards.json`. Re-running is idempotent.
+
+Defaults (local-dev only — change before exposing the port):
+
+| | |
+|--|--|
+| URL | http://localhost:3000 |
+| Login | `admin@claude-otel.local` / `ClaudeOtel#2026` |
+| Database name | "Claude Observability" |
+| Dashboard | "Claude Code Observability" |
+
+> **Memory note:** Metabase's JVM heap is capped at 768 MB so the container fits
+> alongside ClickHouse on a 2 GiB Docker budget. If you see ClickHouse exit with
+> code 137 (OOM), raise Docker Desktop's memory allocation to ≥ 4 GiB
+> (Settings → Resources → Memory) and the cap can be lifted in
+> `docker-compose.yml` (`JAVA_OPTS`).
+
+To extend or modify the dashboard, edit `metabase/cards.json` (each card holds a
+`name`, native ClickHouse `sql`, `display`, `visualization_settings`, and grid
+`position`) and re-run `./metabase/bootstrap.sh`. The layout is overwritten on
+every run; existing cards are detected by name and reused, so renaming a card
+creates a new one.
+
+---
+
 ## Connect an AI client
 
 Copy the ready-to-use config from `config-samples/<tool>/` to your project root and

@@ -1,0 +1,162 @@
+{
+  "collection_name": "Claude Code Observability",
+  "dashboard_name": "Claude Code Observability",
+  "dashboard_description": "Token usage, costs, tool activity, and errors across all AI coding sessions captured by the OTEL stack.",
+  "cards": [
+    {
+      "name": "Total cost (USD)",
+      "description": "Sum of claude_code.cost.usage across all sessions, models, and users.",
+      "sql": "SELECT round(sum(Value), 2) AS total_cost_usd FROM observability.otel_metrics_sum WHERE MetricName = 'claude_code.cost.usage'",
+      "display": "scalar",
+      "visualization_settings": {
+        "scalar.field": "total_cost_usd",
+        "column_settings": {
+          "[\"name\",\"total_cost_usd\"]": {"number_style": "currency", "currency": "USD", "currency_style": "symbol"}
+        }
+      },
+      "position": {"col": 0, "row": 0, "size_x": 6, "size_y": 3}
+    },
+    {
+      "name": "Total tokens",
+      "description": "Sum of all token types (input + output + cacheRead + cacheCreation).",
+      "sql": "SELECT toUInt64(sum(Value)) AS total_tokens FROM observability.otel_metrics_sum WHERE MetricName = 'claude_code.token.usage'",
+      "display": "scalar",
+      "visualization_settings": {"scalar.field": "total_tokens"},
+      "position": {"col": 6, "row": 0, "size_x": 6, "size_y": 3}
+    },
+    {
+      "name": "Active users",
+      "description": "Distinct user emails that emitted at least one cost event.",
+      "sql": "SELECT uniqExact(Attributes['user.email']) AS active_users FROM observability.otel_metrics_sum WHERE MetricName = 'claude_code.cost.usage'",
+      "display": "scalar",
+      "visualization_settings": {"scalar.field": "active_users"},
+      "position": {"col": 12, "row": 0, "size_x": 6, "size_y": 3}
+    },
+    {
+      "name": "Sessions",
+      "description": "Distinct session ids observed.",
+      "sql": "SELECT uniqExact(Attributes['session.id']) AS sessions FROM observability.otel_metrics_sum WHERE MetricName = 'claude_code.cost.usage'",
+      "display": "scalar",
+      "visualization_settings": {"scalar.field": "sessions"},
+      "position": {"col": 18, "row": 0, "size_x": 6, "size_y": 3}
+    },
+    {
+      "name": "Cost over time (daily)",
+      "description": "Daily total cost in USD.",
+      "sql": "SELECT toDate(TimeUnix) AS day, round(sum(Value), 4) AS cost_usd FROM observability.otel_metrics_sum WHERE MetricName = 'claude_code.cost.usage' GROUP BY day ORDER BY day",
+      "display": "line",
+      "visualization_settings": {
+        "graph.dimensions": ["day"],
+        "graph.metrics": ["cost_usd"],
+        "graph.x_axis.title_text": "Day",
+        "graph.y_axis.title_text": "Cost (USD)"
+      },
+      "position": {"col": 0, "row": 3, "size_x": 12, "size_y": 7}
+    },
+    {
+      "name": "Cost by model",
+      "description": "Total cost grouped by model.",
+      "sql": "SELECT Attributes['model'] AS model, round(sum(Value), 4) AS cost_usd FROM observability.otel_metrics_sum WHERE MetricName = 'claude_code.cost.usage' GROUP BY model ORDER BY cost_usd DESC",
+      "display": "pie",
+      "visualization_settings": {
+        "pie.dimension": "model",
+        "pie.metric": "cost_usd"
+      },
+      "position": {"col": 12, "row": 3, "size_x": 12, "size_y": 7}
+    },
+    {
+      "name": "Cost by user (top 10)",
+      "description": "Top 10 most expensive users.",
+      "sql": "SELECT Attributes['user.email'] AS user_email, round(sum(Value), 4) AS cost_usd FROM observability.otel_metrics_sum WHERE MetricName = 'claude_code.cost.usage' GROUP BY user_email ORDER BY cost_usd DESC LIMIT 10",
+      "display": "row",
+      "visualization_settings": {
+        "graph.dimensions": ["user_email"],
+        "graph.metrics": ["cost_usd"]
+      },
+      "position": {"col": 0, "row": 10, "size_x": 12, "size_y": 7}
+    },
+    {
+      "name": "Top 20 most expensive sessions",
+      "description": "Sessions ranked by total cost (USD).",
+      "sql": "SELECT Attributes['session.id'] AS session_id, Attributes['user.email'] AS user_email, round(sum(Value), 4) AS cost_usd FROM observability.otel_metrics_sum WHERE MetricName = 'claude_code.cost.usage' GROUP BY session_id, user_email ORDER BY cost_usd DESC LIMIT 20",
+      "display": "table",
+      "visualization_settings": {},
+      "position": {"col": 12, "row": 10, "size_x": 12, "size_y": 7}
+    },
+    {
+      "name": "Token usage by type (per model)",
+      "description": "Input, output, and cache token totals split by model.",
+      "sql": "SELECT Attributes['model'] AS model, toUInt64(sumIf(Value, Attributes['type'] = 'input')) AS input, toUInt64(sumIf(Value, Attributes['type'] = 'output')) AS output, toUInt64(sumIf(Value, Attributes['type'] = 'cacheRead')) AS cache_read, toUInt64(sumIf(Value, Attributes['type'] = 'cacheCreation')) AS cache_creation FROM observability.otel_metrics_sum WHERE MetricName = 'claude_code.token.usage' GROUP BY model ORDER BY (input + output + cache_read + cache_creation) DESC",
+      "display": "bar",
+      "visualization_settings": {
+        "graph.dimensions": ["model"],
+        "graph.metrics": ["input", "output", "cache_read", "cache_creation"],
+        "stackable.stack_type": "stacked"
+      },
+      "position": {"col": 0, "row": 17, "size_x": 12, "size_y": 7}
+    },
+    {
+      "name": "Cache hit ratio over time",
+      "description": "cacheRead / (input + output + cacheRead) per day. Higher is better.",
+      "sql": "SELECT toDate(TimeUnix) AS day, round(sumIf(Value, Attributes['type'] = 'cacheRead') / nullIf(sumIf(Value, Attributes['type'] IN ('input','output','cacheRead')), 0), 4) AS cache_ratio FROM observability.otel_metrics_sum WHERE MetricName = 'claude_code.token.usage' GROUP BY day ORDER BY day",
+      "display": "line",
+      "visualization_settings": {
+        "graph.dimensions": ["day"],
+        "graph.metrics": ["cache_ratio"],
+        "graph.y_axis.title_text": "Cache hit ratio"
+      },
+      "position": {"col": 12, "row": 17, "size_x": 12, "size_y": 7}
+    },
+    {
+      "name": "Tool calls breakdown",
+      "description": "Span counts grouped by SpanName for the claude-code service.",
+      "sql": "SELECT SpanName AS span, count() AS calls FROM observability.otel_traces WHERE ServiceName = 'claude-code' GROUP BY span ORDER BY calls DESC LIMIT 25",
+      "display": "row",
+      "visualization_settings": {
+        "graph.dimensions": ["span"],
+        "graph.metrics": ["calls"]
+      },
+      "position": {"col": 0, "row": 24, "size_x": 12, "size_y": 7}
+    },
+    {
+      "name": "Activity timeline (hourly logs)",
+      "description": "Number of log records per hour across all services.",
+      "sql": "SELECT toStartOfHour(Timestamp) AS hour, ServiceName AS service, count() AS events FROM observability.otel_logs GROUP BY hour, service ORDER BY hour",
+      "display": "bar",
+      "visualization_settings": {
+        "graph.dimensions": ["hour", "service"],
+        "graph.metrics": ["events"],
+        "stackable.stack_type": "stacked"
+      },
+      "position": {"col": 12, "row": 24, "size_x": 12, "size_y": 7}
+    },
+    {
+      "name": "Hook events by type and tool",
+      "description": "PreToolUse / PostToolUse / failure events grouped by hook event and tool.",
+      "sql": "SELECT LogAttributes['hook_event'] AS hook, splitByChar(':', LogAttributes['hook_name'])[2] AS tool, count() AS events FROM observability.otel_logs WHERE Body LIKE 'claude_code.hook_%' AND LogAttributes['hook_event'] != '' GROUP BY hook, tool ORDER BY events DESC LIMIT 50",
+      "display": "table",
+      "visualization_settings": {},
+      "position": {"col": 0, "row": 31, "size_x": 24, "size_y": 7}
+    },
+    {
+      "name": "Hook trace duration (avg + p95)",
+      "description": "Average and 95th-percentile duration (ms) for cotel hook spans and tool execution spans.",
+      "sql": "SELECT SpanName AS span, round(avg(Duration) / 1e6, 2) AS avg_ms, round(quantile(0.95)(Duration) / 1e6, 2) AS p95_ms, count() AS spans FROM observability.otel_traces WHERE SpanName LIKE 'cotel.hook.%' OR SpanName LIKE 'claude_code.tool%' GROUP BY span ORDER BY p95_ms DESC LIMIT 25",
+      "display": "table",
+      "visualization_settings": {},
+      "position": {"col": 0, "row": 38, "size_x": 12, "size_y": 7}
+    },
+    {
+      "name": "Error rate over time (daily)",
+      "description": "Share of log records with severity ERROR or FATAL per day.",
+      "sql": "SELECT toDate(Timestamp) AS day, round(countIf(SeverityText IN ('ERROR','FATAL')) / nullIf(count(), 0), 4) AS error_rate, count() AS total_logs FROM observability.otel_logs GROUP BY day ORDER BY day",
+      "display": "line",
+      "visualization_settings": {
+        "graph.dimensions": ["day"],
+        "graph.metrics": ["error_rate"],
+        "graph.y_axis.title_text": "Error rate"
+      },
+      "position": {"col": 12, "row": 38, "size_x": 12, "size_y": 7}
+    }
+  ]
+}
